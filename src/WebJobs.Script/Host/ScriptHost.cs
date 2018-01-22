@@ -16,7 +16,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.ApplicationInsights.WindowsServer.TelemetryChannel.Implementation;
-using Microsoft.Azure.AppService.Proxy.Client.Contract;
+using Microsoft.Azure.AppService.Proxy.Client;
 using Microsoft.Azure.WebJobs.Host;
 using Microsoft.Azure.WebJobs.Host.Config;
 using Microsoft.Azure.WebJobs.Host.Indexers;
@@ -65,6 +65,7 @@ namespace Microsoft.Azure.WebJobs.Script
         internal static readonly TimeSpan DefaultFunctionTimeout = TimeSpan.FromMinutes(5);
         internal static readonly TimeSpan MaxFunctionTimeout = TimeSpan.FromMinutes(10);
         private static readonly Regex FunctionNameValidationRegex = new Regex(@"^[a-z][a-z0-9_\-]{0,127}$(?<!^host$)", RegexOptions.Compiled | RegexOptions.IgnoreCase);
+        private static readonly Regex ProxyNameValidationRegex = new Regex(@"[^a-zA-Z0-9_-]", RegexOptions.Compiled | RegexOptions.IgnoreCase);
         public static readonly string Version = GetAssemblyFileVersion(typeof(ScriptHost).Assembly);
         private ScriptSettingsManager _settingsManager;
         private bool _shutdownScheduled;
@@ -1132,9 +1133,12 @@ namespace Microsoft.Azure.WebJobs.Script
 
             string proxiesJson = File.ReadAllText(proxyConfigPath);
 
-            var proxies = LoadProxyRoutes(proxiesJson);
+            if (!string.IsNullOrWhiteSpace(proxiesJson))
+            {
+                return LoadProxyRoutes(proxiesJson);
+            }
 
-            return proxies;
+            return null;
         }
 
         private Collection<FunctionMetadata> LoadProxyRoutes(string proxiesJson)
@@ -1161,8 +1165,8 @@ namespace Microsoft.Azure.WebJobs.Script
             {
                 try
                 {
-                    // Proxy names should follow the same naming restrictions as in function names.
-                    ValidateName(route.Name, true);
+                    // Proxy names should follow the same naming restrictions as in function names. If not, invalid characters will be removed.
+                    var proxyName = NormalizeProxyName(route.Name);
 
                     var proxyMetadata = new FunctionMetadata();
 
@@ -1180,7 +1184,7 @@ namespace Microsoft.Azure.WebJobs.Script
 
                     proxyMetadata.Bindings.Add(bindingMetadata);
 
-                    proxyMetadata.Name = route.Name;
+                    proxyMetadata.Name = proxyName;
                     proxyMetadata.ScriptType = ScriptType.Unknown;
                     proxyMetadata.IsProxy = true;
 
@@ -1227,6 +1231,11 @@ namespace Microsoft.Azure.WebJobs.Script
             {
                 throw new InvalidOperationException(string.Format("'{0}' is not a valid {1} name.", name, isProxy ? "proxy" : "function"));
             }
+        }
+
+        internal static string NormalizeProxyName(string name)
+        {
+            return ProxyNameValidationRegex.Replace(name, string.Empty);
         }
 
         /// <summary>
